@@ -10,10 +10,11 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot Tòa Án & Cảnh Sát đang hoạt động!"
+    return "Bot Tòa Án & Cảnh Sát đang hoạt động 24/7!"
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run)
@@ -24,10 +25,11 @@ keep_alive()
 
 # --- Cấu hình Discord Bot ---
 intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
+intents.message_content = True  # Bắt buộc để đọc lệnh !unprison và !panel
+intents.members = True          # Bắt buộc để đọc thông tin member & trao/gỡ Role
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
 
 # ==========================================
 # TÍNH NĂNG TÒA ÁN & HỖ TRỢ & ĐI TÙ
@@ -69,8 +71,12 @@ class CourtTicketView(View):
             target_member = select_interaction.guild.get_member(target_id)
 
             if target_member:
-                await target_member.add_roles(jail_role)
-                
+                try:
+                    await target_member.add_roles(jail_role)
+                except discord.Forbidden:
+                    await select_interaction.response.send_message("❌ Lỗi: Role của Bot phải đứng CAO HƠN Role Tù Nhân!", ephemeral=True)
+                    return
+
                 original_name = target_member.display_name
                 new_nick = f"Phạm nhân - {original_name}"
                 if len(new_nick) > 32:
@@ -79,7 +85,7 @@ class CourtTicketView(View):
                 try:
                     await target_member.edit(nick=new_nick)
                 except discord.Forbidden:
-                    pass
+                    pass  # Bỏ qua nếu không đổi tên được Chủ Server/Admin
 
                 await select_interaction.response.send_message(
                     f"🚨 **TÒA TUYÊN ÁN:** Bị cáo {target_member.mention} đã bị tống giam và đổi tên thành **{new_nick}**!"
@@ -135,9 +141,14 @@ class MainCourtView(View):
         await self.create_private_channel(interaction, "🆘 TRUNG TÂM HỖ TRỢ", "ho-tro")
 
 
+# -------------------------------------------------------------
+# CÁC LỆNH GÕ TRỰC TIẾP TRONG DISCORD
+# -------------------------------------------------------------
+
 @bot.command(name="panel")
 @commands.has_permissions(administrator=True)
 async def court_panel(ctx):
+    """Tạo bảng Tòa Án & Cần Hỗ Trợ"""
     embed = discord.Embed(
         title="🏛️ TÒA ÁN & TRUNG TÂM HỖ TRỢ SERVER 🏛️",
         description=(
@@ -150,26 +161,48 @@ async def court_panel(ctx):
     )
     await ctx.send(embed=embed, view=MainCourtView())
 
+
 @bot.command(name="unprison")
 @commands.has_permissions(administrator=True)
-async def unprison_user(ctx, member: discord.Member):
-    jail_role = discord.utils.get(ctx.guild.roles, name="Tù Nhân")
-    if jail_role and jail_role in member.roles:
-        await member.remove_roles(jail_role)
-        
-        if member.display_name.startswith("Phạm nhân - "):
-            clean_nick = member.display_name.replace("Phạm nhân - ", "")
-            try:
-                await member.edit(nick=clean_nick)
-            except discord.Forbidden:
-                pass
+async def unprison_user(ctx, member: discord.Member = None):
+    """Ân Xá: !unprison @Member"""
+    if member is None:
+        await ctx.send("⚠️ Bạn cần tag người muốn ân xá! Ví dụ: `!unprison @Tên`")
+        return
 
-        await ctx.send(f"🕊️ **Ân Xá:** Thành viên {member.mention} đã được mãn hạn tù!")
-    else:
-        await ctx.send("❌ Người này hiện không ở trong tù!")
+    jail_role = discord.utils.get(ctx.guild.roles, name="Tù Nhân")
+    
+    # 1. Gỡ Role Tù Nhân
+    if jail_role and jail_role in member.roles:
+        try:
+            await member.remove_roles(jail_role)
+        except discord.Forbidden:
+            await ctx.send("❌ Bot thiếu quyền! Hãy kéo Role của Bot lên cao hơn Role 'Tù Nhân'.")
+            return
+
+    # 2. Khôi phục lại tên cũ (Bỏ chữ 'Phạm nhân - ')
+    if member.display_name.startswith("Phạm nhân - "):
+        clean_nick = member.display_name.replace("Phạm nhân - ", "")
+        try:
+            await member.edit(nick=clean_nick)
+        except discord.Forbidden:
+            pass # Không đổi được nick của Admin/Owner thì bỏ qua
+
+    await ctx.send(f"🕊️ **Ân Xá:** Thành viên {member.mention} đã được mãn hạn tù!")
+
+@unprison_user.error
+async def unprison_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ Bạn cần quyền Administrator để dùng lệnh Ân Xá!")
+
 
 @bot.event
 async def on_ready():
-    print(f'Bot Tòa Án đã đăng nhập thành công dưới tên: {bot.user}')
+    print(f'✅ Bot Tòa Án & Cảnh Sát đã đăng nhập thành công: {bot.user}')
 
-bot.run(os.getenv('TOKEN'))
+# Chạy Bot
+token = os.getenv('TOKEN')
+if token:
+    bot.run(token)
+else:
+    print("❌ LỖI: Chưa có biến môi trường TOKEN!")
