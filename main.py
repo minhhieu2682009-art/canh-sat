@@ -5,7 +5,7 @@ from discord.ui import View, Button
 from flask import Flask
 from threading import Thread
 
-# --- 1. Cấu hình Web Server Flask (Fix lỗi 502 Bad Gateway) ---
+# --- 1. Cấu hình Web Server Flask ---
 app = Flask('')
 
 @app.route('/')
@@ -83,6 +83,9 @@ class MainPanelView(View):
         super().__init__(timeout=None)
 
     async def create_ticket_channel(self, interaction: discord.Interaction, prefix: str):
+        # Báo cho Discord biết bot đang xử lý để không bị gạch đỏ "Ứng dụng không phản hồi"
+        await interaction.response.defer(ephemeral=True)
+
         guild = interaction.guild
         member = interaction.user
         
@@ -106,7 +109,8 @@ class MainPanelView(View):
         )
 
         await channel.send(embed=embed, view=TicketActionView())
-        await interaction.response.send_message(f"✅ Đã tạo kênh riêng cho bạn tại: {channel.mention}", ephemeral=True)
+        # Phản hồi lại sau khi tạo xong kênh
+        await interaction.followup.send(f"✅ Đã tạo kênh riêng cho bạn tại: {channel.mention}", ephemeral=True)
 
     @discord.ui.button(label="⚖️ Khởi Tố / Tố Cáo", style=discord.ButtonStyle.danger, custom_id="btn_tocao")
     async def btn_tocao(self, interaction: discord.Interaction, button: Button):
@@ -120,6 +124,9 @@ class MainPanelView(View):
 
 @bot.event
 async def on_ready():
+    # Đăng ký View vĩnh viễn để bot nhớ nút bấm kể cả khi restart
+    bot.add_view(MainPanelView())
+    bot.add_view(TicketActionView())
     print(f"🤖 Bot {bot.user.name} đã kết nối thành công và đang sẵn sàng!")
 
 @bot.command(name="panel")
