@@ -13,7 +13,6 @@ def home():
     return "Bot Tòa Án & Cảnh Sát đang hoạt động 24/7!"
 
 def run():
-    # Render yêu cầu bắt buộc đọc PORT từ biến môi trường
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
@@ -31,7 +30,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- 3. UI Buttons & Views ---
 
-# Menu chọn người để tống giam
 class PrisonerSelect(discord.ui.Select):
     def __init__(self):
         super().__init__(
@@ -42,7 +40,6 @@ class PrisonerSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # Kiểm tra quyền Admin
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ Bạn không có quyền sử dụng tính năng này!", ephemeral=True)
             return
@@ -56,13 +53,12 @@ class PrisonerSelect(discord.ui.Select):
             return
 
         try:
-            # Gắn role Tù Nhân & Đổi tên
             await target_member.add_roles(prison_role)
             new_nick = f"Phạm nhân - {target_member.display_name}"
-            await target_member.edit(nick=new_nick[:32]) # Discord giới hạn tên 32 ký tự
+            await target_member.edit(nick=new_nick[:32])
             await interaction.response.send_message(f"🚨 **{target_member.mention}** đã bị tống giam và đổi tên thành `{new_nick}`!")
         except discord.Forbidden:
-            await interaction.response.send_message("❌ Bot thiếu quyền để tống giam/đổi tên thành viên này (Cần xếp Role của Bot cao hơn)!", ephemeral=True)
+            await interaction.response.send_message("❌ Bot thiếu quyền (Cần kéo Role của Bot lên cao hơn người này)!", ephemeral=True)
         except Exception as e:
             await interaction.response.send_message(f"❌ Có lỗi xảy ra: {e}", ephemeral=True)
 
@@ -90,12 +86,10 @@ class MainPanelView(View):
         guild = interaction.guild
         member = interaction.user
         
-        # Tìm hoặc tạo category Ticket
         category = discord.utils.get(guild.categories, name="TÒA ÁN & HỖ TRỢ")
         if not category:
             category = await guild.create_category("TÒA ÁN & HỖ TRỢ")
 
-        # Cấu hình phân quyền kênh riêng
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             member: discord.PermissionOverwrite(read_messages=True, send_messages=True),
@@ -105,7 +99,7 @@ class MainPanelView(View):
         channel_name = f"{prefix}-{member.name}"
         channel = await guild.create_text_channel(name=channel_name, category=category, overwrites=overwrites)
 
-        embed = discord.embeds.Embed(
+        embed = discord.Embed(
             title="⚖️ PHIÊN TÒA / KÊNH HỖ TRỢ DÂN SỰ",
             description=f"Xin chào {member.mention},\nAdmin/Cảnh sát sẽ làm việc với bạn tại đây.\n\n*(Chỉ Admin mới có quyền dùng các nút điều khiển bên dưới)*",
             color=discord.Color.red() if prefix == "to-cao" else discord.Color.blue()
@@ -148,7 +142,6 @@ async def ratu(ctx, member: discord.Member):
     if prison_role and prison_role in member.roles:
         await member.remove_roles(prison_role)
     
-    # Khôi phục tên cũ (xóa tiền tố "Phạm nhân - ")
     if member.nick and member.nick.startswith("Phạm nhân - "):
         old_nick = member.nick.replace("Phạm nhân - ", "")
         try:
@@ -159,11 +152,10 @@ async def ratu(ctx, member: discord.Member):
     await ctx.send(f"🕊️ **{member.mention}** đã được ân xá, gỡ vai trò **Tù Nhân** và khôi phục biệt danh thành công!")
 
 # --- 5. Khởi chạy Web Server và Bot ---
-keep_alive()  # Chạy web server Flask ở luồng riêng ( Bắt buộc đứng trước bot.run )
+keep_alive()
 
-TOKEN = os.environ.get("DISCORD_TOKEN") # Lấy Token từ Environment Variables trên Render
+TOKEN = os.environ.get("DISCORD_TOKEN")
 if not TOKEN:
-    # Nếu bạn dán trực tiếp Token trong code thì thay chuỗi bên dưới:
-    TOKEN = "NHẬP_TOKEN_BOT_DISCORD_CỦA_BẠN_VÀO_ĐÂY"
+    TOKEN = "MTUyOTgyMTI0NDk3Mzc4MTA4Mg.Gus8vy.BeCFTuLqM0IHoxTEpWf2-zgB7L_hU5YM27m9k8"
 
 bot.run(TOKEN)
