@@ -155,7 +155,5 @@ async def ratu(ctx, member: discord.Member):
 keep_alive()
 
 TOKEN = os.environ.get("DISCORD_TOKEN")
-if not TOKEN:
-    TOKEN = "MTUyOTgyMTI0NDk3Mzc4MTA4Mg.Gus8vy.BeCFTuLqM0IHoxTEpWf2-zgB7L_hU5YM27m9k8"
 
 bot.run(TOKEN)
