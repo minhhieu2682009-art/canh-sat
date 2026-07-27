@@ -1,4 +1,5 @@
 import os
+import asyncio
 import discord
 from discord.ext import commands
 from discord.ui import View, Button
@@ -45,7 +46,6 @@ class CourtTicketView(View):
             return
         
         await interaction.response.send_message("⚖️ Phiên tòa kết thúc! Kênh này sẽ tự xóa sau 5 giây...")
-        import asyncio
         await asyncio.sleep(5)
         await interaction.channel.delete()
 
@@ -104,6 +104,9 @@ class MainCourtView(View):
         super().__init__(timeout=None)
 
     async def create_private_channel(self, interaction: discord.Interaction, category_name: str, prefix: str):
+        # Chống lỗi timeout ứng dụng không phản hồi
+        await interaction.response.defer(ephemeral=True)
+
         guild = interaction.guild
         user = interaction.user
 
@@ -130,7 +133,7 @@ class MainCourtView(View):
             color=discord.Color.red() if prefix == "to-cao" else discord.Color.blue()
         )
         await channel.send(content=f"{user.mention} | Admin Notification", embed=embed, view=CourtTicketView())
-        await interaction.response.send_message(f"✅ Đã mở phòng riêng cho bạn tại: {channel.mention}", ephemeral=True)
+        await interaction.followup.send(f"✅ Đã mở phòng riêng cho bạn tại: {channel.mention}", ephemeral=True)
 
     @discord.ui.button(label="⚖️ Khởi Tố / Tố Cáo", style=discord.ButtonStyle.danger, custom_id="btn_to_cao")
     async def to_cao_button(self, interaction: discord.Interaction, button: Button):
@@ -186,11 +189,11 @@ async def ratu_user(ctx, member: discord.Member = None):
         try:
             await member.edit(nick=clean_nick)
         except discord.Forbidden:
-            pass # Bỏ qua nếu không đổi tên được Owner/Admin
+            pass
 
     await ctx.send(f"🕊️ **Ân Xá:** Thành viên {member.mention} đã được ra tù và phục hồi tên cũ!")
 
-@ratu_user.error
+@ratu_error
 async def ratu_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
         await ctx.send("❌ Bạn cần quyền Administrator để dùng lệnh Ra Tù!")
@@ -198,11 +201,14 @@ async def ratu_error(ctx, error):
 
 @bot.event
 async def on_ready():
+    # Đăng ký View để nút bấm không bị câm khi bot restart
+    bot.add_view(MainCourtView())
+    bot.add_view(CourtTicketView())
     print(f'✅ Bot Tòa Án & Cảnh Sát đã đăng nhập thành công: {bot.user}')
 
-# Chạy Bot
-token = os.getenv('TOKEN')
+# Chạy Bot (Sửa tên biến thành DISCORD_TOKEN để khớp với Render)
+token = os.getenv('DISCORD_TOKEN')
 if token:
     bot.run(token)
 else:
-    print("❌ LỖI: Chưa có biến môi trường TOKEN!")
+    print("❌ LỖI: Chưa có biến môi trường DISCORD_TOKEN!")
