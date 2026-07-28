@@ -135,11 +135,11 @@ class MainCourtView(View):
 
     @discord.ui.button(label="⚖️ Khởi Tố / Tố Cáo", style=discord.ButtonStyle.danger, custom_id="btn_to_cao")
     async def to_cao_button(self, interaction: discord.Interaction, button: Button):
-        await self.create_private_channel(interaction, "PHIÊN TÒA XÉT XỬ", "to-cao")
+        await self.create_private_channel(interaction, "PHIÊN TÒA XÉT XỬ🏢", "to-cao")
 
     @discord.ui.button(label="🆘 Cần Hỗ Trợ", style=discord.ButtonStyle.primary, custom_id="btn_ho_tro")
     async def ho_tro_button(self, interaction: discord.Interaction, button: Button):
-        await self.create_private_channel(interaction, "TRUNG TÂM HỖ TRỢ", "ho-tro")
+        await self.create_private_channel(interaction, "TRUNG TÂM HỖ TRỢ🧰", "ho-tro")
 
 
 # -------------------------------------------------------------
