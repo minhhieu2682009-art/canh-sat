@@ -26,11 +26,10 @@ keep_alive()
 
 # --- Cấu hình Discord Bot ---
 intents = discord.Intents.default()
-intents.message_content = True  # Bắt buộc để đọc lệnh
-intents.members = True          # Bắt buộc để quản lý thành viên & role
+intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 
 # ==========================================
 # TÍNH NĂNG TÒA ÁN & HỖ TRỢ & ĐI TÙ
@@ -104,7 +103,6 @@ class MainCourtView(View):
         super().__init__(timeout=None)
 
     async def create_private_channel(self, interaction: discord.Interaction, category_name: str, prefix: str):
-        # Chống lỗi timeout ứng dụng không phản hồi
         await interaction.response.defer(ephemeral=True)
 
         guild = interaction.guild
@@ -137,11 +135,11 @@ class MainCourtView(View):
 
     @discord.ui.button(label="⚖️ Khởi Tố / Tố Cáo", style=discord.ButtonStyle.danger, custom_id="btn_to_cao")
     async def to_cao_button(self, interaction: discord.Interaction, button: Button):
-        await self.create_private_channel(interaction, "🏛️ PHIÊN TÒA XÉT XỬ", "to-cao")
+        await self.create_private_channel(interaction, "PHIÊN TÒA XÉT XỬ", "to-cao")
 
     @discord.ui.button(label="🆘 Cần Hỗ Trợ", style=discord.ButtonStyle.primary, custom_id="btn_ho_tro")
     async def ho_tro_button(self, interaction: discord.Interaction, button: Button):
-        await self.create_private_channel(interaction, "🆘 TRUNG TÂM HỖ TRỢ", "ho-tro")
+        await self.create_private_channel(interaction, "TRUNG TÂM HỖ TRỢ", "ho-tro")
 
 
 # -------------------------------------------------------------
@@ -151,7 +149,6 @@ class MainCourtView(View):
 @bot.command(name="panel")
 @commands.has_permissions(administrator=True)
 async def court_panel(ctx):
-    """Tạo bảng Tòa Án & Cần Hỗ Trợ"""
     embed = discord.Embed(
         title="🏛️ TÒA ÁN & TRUNG TÂM HỖ TRỢ SERVER 🏛️",
         description=(
@@ -168,14 +165,12 @@ async def court_panel(ctx):
 @bot.command(name="ratu")
 @commands.has_permissions(administrator=True)
 async def ratu_user(ctx, member: discord.Member = None):
-    """Lệnh Ra Tù (Ân Xá): !ratu @Member"""
     if member is None:
         await ctx.send("⚠️ Bạn cần tag người muốn cho ra tù! Ví dụ: `!ratu @Phạm nhân - Mika`")
         return
 
     jail_role = discord.utils.get(ctx.guild.roles, name="Tù Nhân")
     
-    # 1. Gỡ Role Tù Nhân
     if jail_role and jail_role in member.roles:
         try:
             await member.remove_roles(jail_role)
@@ -183,7 +178,6 @@ async def ratu_user(ctx, member: discord.Member = None):
             await ctx.send("❌ Bot thiếu quyền! Hãy kéo Role của Bot lên cao hơn Role 'Tù Nhân'.")
             return
 
-    # 2. Khôi phục lại tên gốc (Bỏ chữ 'Phạm nhân - ')
     if member.display_name.startswith("Phạm nhân - "):
         clean_nick = member.display_name.replace("Phạm nhân - ", "")
         try:
@@ -193,20 +187,12 @@ async def ratu_user(ctx, member: discord.Member = None):
 
     await ctx.send(f"🕊️ **Ân Xá:** Thành viên {member.mention} đã được ra tù và phục hồi tên cũ!")
 
-@ratu_error
-async def ratu_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ Bạn cần quyền Administrator để dùng lệnh Ra Tù!")
-
-
 @bot.event
 async def on_ready():
-    # Đăng ký View để nút bấm không bị câm khi bot restart
     bot.add_view(MainCourtView())
     bot.add_view(CourtTicketView())
     print(f'✅ Bot Tòa Án & Cảnh Sát đã đăng nhập thành công: {bot.user}')
 
-# Chạy Bot (Sửa tên biến thành DISCORD_TOKEN để khớp với Render)
 token = os.getenv('DISCORD_TOKEN')
 if token:
     bot.run(token)
