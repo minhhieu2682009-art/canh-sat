@@ -31,6 +31,10 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# Biến lưu trữ ID kênh nhà tù và lưu role cũ của phạm nhân khi bị tống giam
+designated_jail_channel_id = None
+user_saved_roles = {}
+
 # Hàm hỗ trợ tìm hoặc tạo danh mục an toàn (tránh lỗi emoji)
 async def get_or_create_category(guild, category_name):
     category = discord.utils.get(guild.categories, name=category_name)
@@ -79,18 +83,6 @@ class CourtTicketView(View):
         if not jail_role:
             jail_role = await interaction.guild.create_role(name="Tù Nhân", color=discord.Color.dark_gray())
 
-        # Đảm bảo có kênh ngục-tù để phạm nhân chat
-        jail_channel = discord.utils.get(interaction.guild.text_channels, name="ngục-tù")
-        if not jail_channel:
-            jail_overwrites = {
-                interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                jail_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-                interaction.guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-            }
-            jail_channel = await interaction.guild.create_text_channel(name="ngục-tù", overwrites=jail_overwrites)
-        else:
-            await jail_channel.set_permissions(jail_role, read_messages=True, send_messages=True)
-
         options = [
             discord.SelectOption(label=m.display_name, value=str(m.id), emoji="👤")
             for m in interaction.guild.members if not m.bot
@@ -106,7 +98,6 @@ class CourtTicketView(View):
                 await select_interaction.response.send_message("❌ Không tìm thấy đối tượng này trong server!", ephemeral=True)
                 return
 
-            # Bước tiếp theo: Chọn thời gian tù với giao diện icon đẹp mắt
             duration_options = [
                 discord.SelectOption(label="1 Phút (Chế độ Test nhanh)", value="60", emoji="⏱️"),
                 discord.SelectOption(label="30 Phút", value="1800", emoji="⏳"),
@@ -120,10 +111,16 @@ class CourtTicketView(View):
             async def duration_callback(duration_interaction: discord.Interaction):
                 duration_seconds = int(select_duration.values[0])
 
+                # Lưu lại các role cũ của thành viên (trừ @everyone và role quản lý) và gỡ bỏ để họ không chat ở kênh khác
+                roles_to_remove = [r for r in target_member.roles if r != duration_interaction.guild.default_role and not r.managed and r != jail_role]
+                user_saved_roles[target_member.id] = roles_to_remove
+
                 try:
-                    await target_member.add_roles(jail_role)
+                    if roles_to_remove:
+                        await target_member.remove_roles(*roles_to_remove, reason="Bị tống giam vào ngục")
+                    await target_member.add_roles(jail_role, reason="Bị tống giam vào ngục")
                 except discord.Forbidden:
-                    await duration_interaction.response.send_message("❌ **Lỗi hệ thống:** Role của Bot phải đứng CAO HƠN Role 'Tù Nhân' trong danh sách vai trò!", ephemeral=True)
+                    await duration_interaction.response.send_message("❌ **Lỗi hệ thống:** Role của Bot phải đứng CAO HƠN các role khác và role 'Tù Nhân' trong danh sách vai trò!", ephemeral=True)
                     return
 
                 original_name = target_member.display_name
@@ -136,23 +133,26 @@ class CourtTicketView(View):
                 except discord.Forbidden:
                     pass
 
-                # Thông báo thời gian tù
                 time_str = "Vĩnh viễn (Chờ ân xá)"
                 if duration_seconds == 60: time_str = "1 phút"
                 elif duration_seconds == 1800: time_str = "30 phút"
                 elif duration_seconds == 3600: time_str = "1 giờ"
                 elif duration_seconds == 86400: time_str = "1 ngày"
 
+                # Lấy kênh nhà tù đã được thiết lập
+                global designated_jail_channel_id
+                jail_channel = duration_interaction.guild.get_channel(designated_jail_channel_id) if designated_jail_channel_id else discord.utils.get(duration_interaction.guild.text_channels, name="ngục-tù")
+                jail_mention = jail_channel.mention if jail_channel else "Kênh Nhà Tù"
+
                 await duration_interaction.response.send_message(
                     f"🚨 **BẢN ÁN ĐÃ TUYÊN:** Bị cáo {target_member.mention} đã bị tống giam!\n"
                     f"🏷️ **Danh hiệu mới:** `{new_nick}`\n"
                     f"⏰ **Thời hạn thi hành:** `{time_str}`\n"
-                    f"💬 **Khu vực giam giữ:** {jail_channel.mention}"
+                    f"🔒 **Trạng thái:** Đã bị tước quyền chat ở toàn bộ kênh khác và chỉ có thể hoạt động tại {jail_mention}."
                 )
 
-                # Thiết lập tác vụ ngầm tự động mãn hạn tù nếu không phải vĩnh viễn
                 if duration_seconds > 0:
-                    bot.loop.create_task(auto_unveil(target_member, jail_role, original_name, duration_seconds, jail_channel))
+                    bot.loop.create_task(auto_unveil(target_member, jail_role, original_name, duration_seconds, duration_interaction.guild))
 
             select_duration.callback = duration_callback
             view_duration = View()
@@ -195,14 +195,22 @@ class CourtTicketView(View):
         await interaction.response.send_message("👥 **BẢNG TRIỆU TẬP:** Chọn nhân chứng bên dưới:", view=view, ephemeral=True)
 
 
-# Tác vụ chạy ngầm tự động thả tù nhân khi hết giờ
-async def auto_unveil(member, jail_role, original_name, delay, jail_channel):
+# Tác vụ chạy ngầm tự động thả tù nhân khi hết giờ và trả lại role cũ
+async def auto_unveil(member, jail_role, original_name, delay, guild):
     await asyncio.sleep(delay)
     
-    # Kiểm tra xem người đó còn giữ role tù nhân không
+    # Trả lại các role cũ đã lưu
+    if member.id in user_saved_roles:
+        roles_to_restore = user_saved_roles[member.id]
+        try:
+            await member.add_roles(*roles_to_restore, reason="Mãn hạn tù tự động")
+        except discord.Forbidden:
+            pass
+        del user_saved_roles[member.id]
+
     if jail_role in member.roles:
         try:
-            await member.remove_roles(jail_role)
+            await member.remove_roles(jail_role, reason="Mãn hạn tù tự động")
         except discord.Forbidden:
             pass
 
@@ -212,8 +220,11 @@ async def auto_unveil(member, jail_role, original_name, delay, jail_channel):
         except discord.Forbidden:
             pass
 
+    global designated_jail_channel_id
+    jail_channel = guild.get_channel(designated_jail_channel_id) if designated_jail_channel_id else discord.utils.get(guild.text_channels, name="ngục-tù")
+
     if jail_channel:
-        await jail_channel.send(f"🕊️ **MÃN HẠN TÙ TỰ ĐỘNG:** Phạm nhân {member.mention} đã hoàn thành án phạt, được trả tự do và khôi phục tên cũ!")
+        await jail_channel.send(f"🕊️ **MÃN HẠN TÙ TỰ ĐỘNG:** Phạm nhân {member.mention} đã hoàn thành án phạt, được trả tự do, khôi phục toàn bộ chức vụ/role cũ và tên cũ!")
 
 
 class MainCourtView(View):
@@ -226,7 +237,6 @@ class MainCourtView(View):
         guild = interaction.guild
         user = interaction.user
 
-        # Tự động tạo role Thẩm Phán nếu chưa có
         judge_role = discord.utils.get(guild.roles, name="Thẩm Phán")
         if not judge_role:
             judge_role = await guild.create_role(name="Thẩm Phán", color=discord.Color.gold())
@@ -271,6 +281,39 @@ class MainCourtView(View):
 # CÁC LỆNH GÕ TRỰC TIẾP TRONG DISCORD
 # -------------------------------------------------------------
 
+@bot.command(name="nhatu")
+@commands.has_permissions(administrator=True)
+async def set_nhatu(ctx):
+    """Lệnh dành riêng cho Admin để biến kênh hiện tại thành Nhà Tù chính thức"""
+    global designated_jail_channel_id
+    designated_jail_channel_id = ctx.channel.id
+
+    jail_role = discord.utils.get(ctx.guild.roles, name="Tù Nhân")
+    if not jail_role:
+        jail_role = await ctx.guild.create_role(name="Tù Nhân", color=discord.Color.dark_gray())
+
+    # Cấu hình quyền cho kênh này: Chỉ Tù Nhân mới được nhắn tin. Người không phải phạm nhân không thể chat ở đây.
+    overwrites = {
+        ctx.guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
+        jail_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        ctx.guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+    }
+
+    judge_role = discord.utils.get(ctx.guild.roles, name="Thẩm Phán")
+    if judge_role:
+        overwrites[judge_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+    for role in ctx.guild.roles:
+        if role.permissions.administrator:
+            overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+    try:
+        await ctx.channel.edit(overwrites=overwrites)
+        await ctx.send(f"🔒 **THIẾT LẬP NHÀ TÙ THÀNH CÔNG:** Kênh {ctx.channel.mention} đã chính thức trở thành **Khu Vực Giam Giữ**!\n- Chỉ có **Phạm Nhân** mới được phép nhắn tin tại đây.\n- Người không phải phạm nhân không thể nhắn tin trong kênh này.")
+    except discord.Forbidden:
+        await ctx.send("❌ **Lỗi:** Bot thiếu quyền Quản lý kênh (Manage Channels) để cấu hình kênh này!")
+
+
 @bot.command(name="panel")
 @commands.has_permissions(administrator=True)
 async def court_panel(ctx):
@@ -284,7 +327,7 @@ async def court_panel(ctx):
         ),
         color=discord.Color.gold()
     )
-    embed.set_image(url="https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80") # Ảnh minh họa tòa án sang trọng
+    embed.set_image(url="https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80")
     await ctx.send(embed=embed, view=MainCourtView())
 
 
@@ -296,10 +339,20 @@ async def ratu_user(ctx, member: discord.Member = None):
         return
 
     jail_role = discord.utils.get(ctx.guild.roles, name="Tù Nhân")
+    
+    # Khôi phục lại các role cũ đã lưu trữ trước khi bị bắt
+    if member.id in user_saved_roles:
+        roles_to_restore = user_saved_roles[member.id]
+        try:
+            await member.add_roles(*roles_to_restore, reason="Ân xá bởi Admin")
+        except discord.Forbidden:
+            await ctx.send("❌ **Lỗi phân quyền:** Bot thiếu quyền để trả lại role cũ cho thành viên này! Hãy kéo Role của Bot lên cao nhất.")
+            return
+        del user_saved_roles[member.id]
      
     if jail_role and jail_role in member.roles:
         try:
-            await member.remove_roles(jail_role)
+            await member.remove_roles(jail_role, reason="Ân xá")
         except discord.Forbidden:
             await ctx.send("❌ **Lỗi phân quyền:** Bot thiếu quyền! Hãy kéo Role của Bot lên cao hơn Role 'Tù Nhân'.")
             return
@@ -311,7 +364,7 @@ async def ratu_user(ctx, member: discord.Member = None):
         except discord.Forbidden:
             pass
 
-    await ctx.send(f"🕊️ **ÂN XÁ THÀNH CÔNG:** Thành viên {member.mention} đã được tha tù trước thời hạn và phục hồi tên cũ!")
+    await ctx.send(f"🕊️ **ÂN XÁ THÀNH CÔNG:** Thành viên {member.mention} đã được ân xá, khôi phục toàn bộ role cũ và tên cũ!")
 
 @bot.event
 async def on_ready():
